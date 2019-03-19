@@ -7,10 +7,7 @@ output: html_document
 
 # Download and install dependencies
 ```{r}
-install.packages("tm")  # for text mining
-install.packages("SnowballC") # for text stemming
-install.packages("wordcloud") # word-cloud generator
-install.packages('enrichR')
+library(rmarkdown)
 library('enrichR')
 library(ggplot2)
 library(RColorBrewer)
@@ -43,13 +40,6 @@ dbs <- listEnrichrDbs()
 
 # perform pathway enrichment using the entire enrichR library
 enrichment = enrichr(genes = p53_KCs_significant$mgi_symbol, databases=c("KEGG_2016","Reactome_2016","WikiPathways_2016","BioCarta_2016","GO_Molecular_Function_2018","GO_Biological_Process_2018"))
-# Extract the significant pathways only:
-significant <- function(df){
-  subset(df,df$Adjusted.P.value<0.01)
-}
-
-all_sig_paths <- lapply(enrichment, significant(df))
-ede
 
 # Concatenate all pathways, extract terms, and create word cloud
 # this code is based on http://www.sthda.com/english/wiki/text-mining-and-word-cloud-fundamentals-in-r-5-simple-steps-you-should-know
