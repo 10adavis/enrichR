@@ -1,0 +1,147 @@
+---
+title: "enrichR"
+author: "Andrew Davis"
+date: "3/13/2019"
+output: html_document
+---
+
+# Download and install dependencies
+```{r}
+install.packages("tm")  # for text mining
+install.packages("SnowballC") # for text stemming
+install.packages("wordcloud") # word-cloud generator
+install.packages('enrichR')
+library('enrichR')
+library(ggplot2)
+library(RColorBrewer)
+library(gplots)
+library(genefilter)
+library(cowplot)
+library(scales) 
+library("tm")
+library("SnowballC")
+library("wordcloud")
+library("plyr")
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(stringr)
+```
+
+
+
+```{r}
+# Read in our dataset
+p53_KCs <- read.csv("DESeq2_p53null-vs-WT_Norm-Counts_Results_Annotated_padj_0.05.csv",header=TRUE,stringsAsFactors = FALSE)
+
+# Get the subset of data that is significantly different between wild type and mutant
+p53_KCs_significant = subset(p53_KCs, P.adj < 0.05 & log2.FC. > 1)
+write.table(p53_KCs_significant$gene_symbol, file = "significant_genes.txt", sep = "\t", quote = F, row.names = F)
+
+# List all of the available libraries
+dbs <- listEnrichrDbs()
+
+# perform pathway enrichment using the entire enrichR library
+enrichment = enrichr(genes = p53_KCs_significant$mgi_symbol, databases=c("KEGG_2016","Reactome_2016","WikiPathways_2016","BioCarta_2016","GO_Molecular_Function_2018","GO_Biological_Process_2018"))
+# Extract the significant pathways only:
+significant <- function(df){
+  subset(df,df$Adjusted.P.value<0.01)
+}
+
+all_sig_paths <- lapply(enrichment, significant(df))
+ede
+
+# Concatenate all pathways, extract terms, and create word cloud
+# this code is based on http://www.sthda.com/english/wiki/text-mining-and-word-cloud-fundamentals-in-r-5-simple-steps-you-should-know
+extract_pathway_terms <- function(enrichment){
+# Concatnate the enrichR pathways from all of the databases queried
+all_paths <- rbindlist(enrichment)
+# Extract the significant pathways only:
+all_sig_paths <- subset(all_paths,Adjusted.P.value<0.01)
+# Concatenate all sig pathways into one long character string
+all_terms <- paste(all_sig_paths$Term,collapse=' ')
+docs <- Corpus(VectorSource(all_terms))
+# create function to convert certain characters to a space
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+docs <- tm_map(docs, toSpace, "/")
+docs <- tm_map(docs, toSpace, "@")
+docs <- tm_map(docs, toSpace, "\\|")
+docs <- tm_map(docs, toSpace, "-")
+docs <- tm_map(docs, toSpace, "_")
+docs <- tm_map(docs, toSpace, ")")
+docs <- tm_map(docs, toSpace, "\\(")
+# Convert the text to lower case
+docs <- tm_map(docs, content_transformer(tolower))
+# Remove punctuations
+docs <- tm_map(docs, removePunctuation)
+# Remove numbers - don't want to do because this would screw up many genes with #s in the name
+# docs <- tm_map(docs, removeNumbers)
+# Eliminate extra white spaces
+docs <- tm_map(docs, stripWhitespace)
+# Remove english common stopwords
+docs <- tm_map(docs, removeWords, stopwords("english"))
+# Remove your own stop word - specify your stopwords as a character vector
+docs <- tm_map(docs, removeWords, c("ljp","ljp006","ljp005","gtex","years","hepg","mcf","ctd","esophagus","mcfa", "brain","positive","like","loss","go","the","sample","gse",
+"human","hmdb","mouse","activity","acid", "pathway","cells","homo","sapiens","module","male","female","sex","metabolic","process","hsa","mus","musculus","donors",
+"acting","acceptor","one","binding","regulation","assembly")) 
+dtm <- TermDocumentMatrix(docs)
+m <- as.matrix(dtm)
+v <- sort(rowSums(m),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+
+# Generate word cloud
+return(d)
+}
+
+p53_Words <- extract_pathway_terms(enrichment)
+
+Wordcloud <- function (words){
+  set.seed(1234) +
+       wordcloud(words = words$word, freq = words$freq, min.freq = 1,
+          max.words=100, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+}
+
+Wordcloud(p53_Words)
+head(p53_Words,50)
+
+
+```
+
+
+
+# Export and Plot pathway enrichments for specific databases:
+```{r}
+# Create function to plot pathways:
+pathways.plot <- function(data, name)
+{
+      name <- ggplot(data, aes(x=data$Term, y=(-log10(data$Adjusted.P.value)), 
+      fill=data$Z.score)) + scale_fill_gradient2(midpoint=0, low=muted("blue"), mid="white", high=muted("red"), space ="Lab", guide="colourbar") + 
+      geom_histogram(stat="identity",width=0.8) + labs(x =NULL,y="-log(p-value)",fill="z-score") + scale_y_continuous(expand=c(0,0)) +
+      # the following these removeds background, gridlines, etc
+      theme(axis.line.x = element_line(size=2,linetype = 1), panel.background = element_rect(fill=NA,size=rel(20)), 
+      panel.grid.major.x=element_line(colour = NA), panel.grid.major.y=element_line(colour = NA),
+      axis.line.y = element_line(size=2,linetype = 1), panel.border=element_rect(),
+      panel.grid.minor = element_line(colour = NA), 
+      legend.position = c(0.87, 0.20), legend.key.size = unit(0.6, "cm"), 
+      legend.background = element_rect(fill="white", size=8, linetype="solid"),
+      legend.text=element_text(size=12,family="Arial"),
+      legend.title=element_text(size=12,family="Arial"),
+      axis.title=element_text(size=12, family="Arial"),
+      axis.text=element_text(size=12, family="Arial")) + 
+      theme(axis.text.x = element_text()) +
+      theme(axis.ticks = element_line(colour = "black", size = 2)) +
+      coord_flip() # flips the axes
+  return(name)
+}
+
+top_kegg_enrichment <- head(enrichment$KEGG_2016, 10)
+
+write.table(x=top_kegg_enrichment, file = "KEGG_enrichment_results_2019-03-15.txt", sep = "\t", quote = F, row.names = F)
+
+
+# Plot top kegg pathways:
+tiff("top.tiff",1000,400)
+pathways.plot(top_kegg_enrichment, top)
+dev.off()
+```
